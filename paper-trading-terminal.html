@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper Trading Terminal — Live Market Data</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; }
+  body { background:#07090d; color:#d6deeb; font-family:'JetBrains Mono','SF Mono',Consolas,'Courier New',monospace; font-size:12px; overflow-x:hidden; }
+  .topbar { display:flex; align-items:center; gap:14px; padding:8px 12px; background:#0d1117; border-bottom:1px solid #1e2635; flex-wrap:wrap; }
+  .brand { font-size:15px; font-weight:700; letter-spacing:1px; color:#fff; }
+  .brand span { color:#f0b90b; }
+  .badge { background:#123324; color:#16c784; border:1px solid #16c784; padding:2px 8px; border-radius:3px; font-size:10px; letter-spacing:1px; }
+  .badge.fake { background:#33270a; color:#f0b90b; border-color:#f0b90b; }
+  .conn { display:flex; align-items:center; gap:6px; font-size:11px; color:#8b98a9; }
+  .dot { width:8px; height:8px; border-radius:50%; background:#ea3943; }
+  .dot.on { background:#16c784; box-shadow:0 0 6px #16c784; }
+  .clock { margin-left:auto; color:#8b98a9; }
+  .symbar { display:flex; gap:6px; padding:8px 12px; background:#0a0e14; border-bottom:1px solid #1e2635; flex-wrap:wrap; align-items:center; }
+  .sym { background:#11161f; color:#d6deeb; border:1px solid #1e2635; padding:6px 12px; cursor:pointer; font-family:inherit; font-size:12px; border-radius:3px; }
+  .sym:hover { border-color:#4da3ff; }
+  .sym.active { background:#1b2740; border-color:#4da3ff; color:#fff; }
+  .bigprice { font-size:22px; font-weight:700; color:#fff; margin-left:10px; }
+  .stat { color:#8b98a9; } .stat b { color:#d6deeb; font-weight:600; }
+  .up { color:#16c784 !important; } .down { color:#ea3943 !important; }
+  .grid { display:grid; grid-template-columns: 1fr 300px; gap:8px; padding:8px; }
+  .panel { background:#0d1117; border:1px solid #1e2635; border-radius:4px; padding:8px; }
+  .ptitle { font-size:10px; letter-spacing:1.5px; color:#8b98a9; margin-bottom:6px; text-transform:uppercase; }
+  #chart { width:100%; height:340px; display:block; background:#0a0e14; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { text-align:right; color:#5b6677; font-weight:400; padding:2px 4px; }
+  td { text-align:right; padding:2px 4px; color:#d6deeb; }
+  td.l, th.l { text-align:left; }
+  .bookrow { position:relative; }
+  .depthbar { position:absolute; top:0; right:0; bottom:0; opacity:.14; }
+  .spread { text-align:center; padding:5px 0; color:#8b98a9; border-top:1px solid #1e2635; border-bottom:1px solid #1e2635; margin:4px 0; }
+  .tape { max-height:180px; overflow:hidden; }
+  .bottom { display:grid; grid-template-columns: 300px 1fr 1fr; gap:8px; padding:0 8px 8px; }
+  .btn { font-family:inherit; font-size:12px; padding:8px 0; width:100%; border:none; border-radius:3px; cursor:pointer; font-weight:700; letter-spacing:.5px; }
+  .buy { background:#16c784; color:#04120b; } .sell { background:#ea3943; color:#170404; }
+  .btn:active { transform:translateY(1px); }
+  .btnrow { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:6px; }
+  input, select { width:100%; background:#0a0e14; border:1px solid #1e2635; color:#fff; padding:7px; font-family:inherit; font-size:12px; border-radius:3px; margin-bottom:6px; }
+  label { display:block; color:#8b98a9; font-size:10px; letter-spacing:1px; margin-bottom:3px; text-transform:uppercase; }
+  .acct { font-size:12px; line-height:1.9; }
+  .acct b { float:right; color:#fff; }
+  .mini { font-size:10px; color:#5b6677; }
+  .cancel { background:none; border:1px solid #ea3943; color:#ea3943; padding:1px 7px; cursor:pointer; font-family:inherit; font-size:10px; border-radius:3px; }
+  .hist { max-height:150px; overflow-y:auto; }
+  .reset { background:none; border:1px solid #5b6677; color:#8b98a9; padding:4px 10px; cursor:pointer; font-family:inherit; font-size:10px; border-radius:3px; margin-top:8px; }
+  @media (max-width: 900px){ .grid{grid-template-columns:1fr;} .bottom{grid-template-columns:1fr;} }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">◈ PAPER<span>TERMINAL</span></div>
+  <div class="badge">LIVE MARKET DATA · COINBASE EXCHANGE</div>
+  <div class="badge fake">FAKE MONEY · $100,000 PAPER ACCOUNT</div>
+  <div class="conn"><div class="dot" id="wsdot"></div><span id="wsstat">connecting…</span></div>
+  <div class="clock" id="clock"></div>
+</div>
+
+<div class="symbar" id="symbar"></div>
+
+<div class="grid">
+  <div class="panel">
+    <div class="ptitle" id="charttitle">Chart · 1m candles</div>
+    <canvas id="chart"></canvas>
+    <div class="ptitle" style="margin-top:8px;">Recent trades (real, from the exchange)</div>
+    <div class="tape"><table><thead><tr><th class="l">Time</th><th>Price</th><th>Size</th><th>Side</th></tr></thead><tbody id="tape"></tbody></table></div>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Order book · Level 2 (real)</div>
+    <table><thead><tr><th class="l">Price (USD)</th><th>Size</th><th>Total</th></tr></thead><tbody id="asks"></tbody></table>
+    <div class="spread" id="spread">spread —</div>
+    <table><tbody id="bids"></tbody></table>
+  </div>
+</div>
+
+<div class="bottom">
+  <div class="panel">
+    <div class="ptitle">Place paper order</div>
+    <label>Order type</label>
+    <select id="otype"><option value="market">Market (fill at real bid/ask)</option><option value="limit">Limit (rest until price crosses)</option></select>
+    <label>Amount (USD to spend / receive)</label>
+    <input id="amt" type="number" value="1000" min="1" step="any">
+    <label id="limitlabel" style="display:none;">Limit price (USD)</label>
+    <input id="limitpx" type="number" step="any" style="display:none;">
+    <div class="btnrow">
+      <button class="btn buy" id="buybtn">BUY</button>
+      <button class="btn sell" id="sellbtn">SELL</button>
+    </div>
+    <div class="mini" style="margin-top:6px;">Market orders fill instantly at the live best ask (buy) or best bid (sell). No real money, no account, no fees.</div>
+    <div class="ptitle" style="margin-top:12px;">Account</div>
+    <div class="acct">
+      Cash <b id="a-cash">—</b><br>
+      Equity <b id="a-eq">—</b><br>
+      Realized P&amp;L <b id="a-rpnl">—</b><br>
+      Unrealized P&amp;L <b id="a-upnl">—</b>
+    </div>
+    <button class="reset" id="resetbtn">Reset account to $100,000</button>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Positions</div>
+    <table><thead><tr><th class="l">Asset</th><th>Qty</th><th>Avg cost</th><th>Price</th><th>Value</th><th>P&amp;L</th></tr></thead><tbody id="positions"></tbody></table>
+    <div class="ptitle" style="margin-top:12px;">Open limit orders</div>
+    <table><thead><tr><th class="l">Asset</th><th>Side</th><th>USD amt</th><th>Limit</th><th></th></tr></thead><tbody id="openorders"></tbody></table>
+  </div>
+  <div class="panel">
+    <div class="ptitle">Your order history</div>
+    <div class="hist"><table><thead><tr><th class="l">Time</th><th class="l">Order</th><th>Qty</th><th>Price</th></tr></thead><tbody id="history"></tbody></table></div>
+  </div>
+</div>
+
+<script>
+const SYMBOLS = ["BTC-USD","ETH-USD","SOL-USD","DOGE-USD"];
+const API = "https://api.exchange.coinbase.com";
+let cur = "BTC-USD";
+let prices = {};          // last ticker price per symbol
+let bestBid = {}, bestAsk = {};
+let candles = [];         // ascending [t,o,h,l,c,v]
+let book = { bids:new Map(), asks:new Map() };
+
+// ---------- persistent paper account ----------
+const store = {
+  _m: null,
+  get(){ try { return localStorage.getItem("paperTermV1"); } catch(e){ return this._m; } },
+  set(v){ this._m = v; try { localStorage.setItem("paperTermV1", v); } catch(e){} }
+};
+let acct = JSON.parse(store.get() || "null") || { cash:100000, positions:{}, orders:[], history:[], realized:0 };
+function save(){ store.set(JSON.stringify(acct)); }
+const $ = id => document.getElementById(id);
+const fmt$ = n => (n<0?"-$":"$") + Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2});
+const fmtP = n => n>=1000 ? n.toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2}) : n>=1 ? n.toFixed(3) : n.toFixed(5);
+const fmtQ = n => n.toLocaleString("en-US",{maximumFractionDigits:6});
+
+// ---------- clock ----------
+setInterval(()=>{ $("clock").textContent = new Date().toUTCString().slice(17,25) + " UTC"; }, 500);
+
+// ---------- symbol bar ----------
+function renderSymbar(stats){
+  $("symbar").innerHTML = SYMBOLS.map(s =>
+    `<button class="sym ${s===cur?'active':''}" data-sym="${s}">${s}</button>`).join("") +
+    `<div class="bigprice" id="bigprice">—</div>
+     <div class="stat">24h <b id="s-chg">—</b></div>
+     <div class="stat">High <b id="s-high">—</b></div>
+     <div class="stat">Low <b id="s-low">—</b></div>
+     <div class="stat">Volume <b id="s-vol">—</b></div>`;
+  document.querySelectorAll(".sym").forEach(b => b.onclick = () => switchSymbol(b.dataset.sym));
+}
+async function loadStats(){
+  try {
+    const r = await fetch(`${API}/products/${cur}/stats`); const s = await r.json();
+    const open = parseFloat(s.open), last = parseFloat(s.last);
+    const chg = open ? ((last-open)/open*100) : 0;
+    $("s-chg").innerHTML = `<span class="${chg>=0?'up':'down'}">${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+    $("s-high").textContent = fmtP(parseFloat(s.high));
+    $("s-low").textContent = fmtP(parseFloat(s.low));
+    $("s-vol").textContent = parseFloat(s.volume).toLocaleString("en-US",{maximumFractionDigits:1});
+  } catch(e){}
+}
+async function loadCandles(){
+  try {
+    const r = await fetch(`${API}/products/${cur}/candles?granularity=60`); const raw = await r.json();
+    candles = raw.slice(0,180).reverse().map(c => ({t:c[0], l:c[1], h:c[2], o:c[3], c:c[4], v:c[5]}));
+    drawChart();
+  } catch(e){}
+}
+
+// ---------- chart ----------
+function drawChart(){
+  const cv = $("chart"), dpr = window.devicePixelRatio||1;
+  const W = cv.clientWidth, H = cv.clientHeight; if(!W) return;
+  if (cv.width !== W*dpr){ cv.width = W*dpr; cv.height = H*dpr; }
+  const x = cv.getContext("2d"); x.scale(dpr,dpr); x.clearRect(0,0,W,H);
+  if (candles.length < 2) return;
+  const data = candles.slice(-110);
+  let hi = -Infinity, lo = Infinity;
+  data.forEach(c => { hi = Math.max(hi,c.h); lo = Math.min(lo,c.l); });
+  const pad = (hi-lo)*0.08 || 1; hi += pad; lo -= pad;
+  const y = p => H - (p-lo)/(hi-lo)*H;
+  x.strokeStyle = "#1a2233"; x.fillStyle = "#5b6677"; x.font = "10px monospace";
+  for (let i=1;i<5;i++){ const gy = H*i/5; x.beginPath(); x.moveTo(0,gy); x.lineTo(W,gy); x.stroke(); x.fillText(fmtP(hi-(hi-lo)*i/5), 4, gy-3); }
+  const cw = W/data.length;
+  data.forEach((c,i) => {
+    const cx = i*cw + cw/2, up = c.c >= c.o;
+    x.strokeStyle = up ? "#16c784" : "#ea3943"; x.fillStyle = x.strokeStyle;
+    x.beginPath(); x.moveTo(cx, y(c.h)); x.lineTo(cx, y(c.l)); x.stroke();
+    const t = y(Math.max(c.o,c.c)), b = y(Math.min(c.o,c.c));
+    x.fillRect(i*cw+1, t, Math.max(1,cw-2), Math.max(1,b-t));
+  });
+  const last = data[data.length-1].c;
+  x.strokeStyle = "#f0b90b"; x.setLineDash([4,4]); x.beginPath(); x.moveTo(0,y(last)); x.lineTo(W,y(last)); x.stroke(); x.setLineDash([]);
+  $("charttitle").textContent = `${cur} · 1m candles · last ${fmtP(last)}`;
+}
+
+// ---------- order book ----------
+function renderBook(){
+  const bids = [...book.bids.entries()].sort((a,b)=>b[0]-a[0]).slice(0,13);
+  const asks = [...book.asks.entries()].sort((a,b)=>a[0]-b[0]).slice(0,13);
+  const maxB = Math.max(...bids.map(b=>b[1]), 0.0001), maxA = Math.max(...asks.map(a=>a[1]), 0.0001);
+  let run = 0;
+  $("bids").innerHTML = bids.map(([p,s]) => { run += p*s; return `<tr class="bookrow"><td class="l up" style="position:relative;">${fmtP(p)}</td><td>${fmtQ(s)}</td><td>${fmt$(run)}<div class="depthbar" style="background:#16c784;width:${(s/maxB*100).toFixed(0)}%"></div></td></tr>`; }).join("");
+  run = 0;
+  $("asks").innerHTML = asks.slice().reverse().map(([p,s]) => { run += p*s; return `<tr class="bookrow"><td class="l down" style="position:relative;">${fmtP(p)}</td><td>${fmtQ(s)}</td><td>${fmt$(run)}<div class="depthbar" style="background:#ea3943;width:${(s/maxA*100).toFixed(0)}%"></div></td></tr>`; }).join("");
+  if (bids.length && asks.length){
+    bestBid[cur] = bids[0][0]; bestAsk[cur] = asks[0][0];
+    const sp = asks[0][0]-bids[0][0], mid = (asks[0][0]+bids[0][0])/2;
+    $("spread").innerHTML = `spread <b style="color:#fff">${fmtP(sp)}</b> · mid <b style="color:#fff">${fmtP(mid)}</b> · ${(sp/mid*100).toFixed(3)}%`;
+  }
+}
+
+// ---------- trading engine ----------
+function fillOrder(side, sym, usdAmt, px, type){
+  const qty = usdAmt / px;
+  const pos = acct.positions[sym] || { qty:0, avg:0 };
+  let filledQty = qty;
+  if (side === "buy"){
+    if (usdAmt > acct.cash + 1e-9) return false;
+    pos.avg = (pos.qty*pos.avg + qty*px) / (pos.qty + qty || 1);
+    pos.qty += qty; acct.cash -= usdAmt;
+  } else {
+    const sellQty = Math.min(qty, pos.qty);
+    if (sellQty <= 0) return false;
+    filledQty = sellQty;
+    acct.realized += (px - pos.avg) * sellQty;
+    pos.qty -= sellQty; acct.cash += sellQty * px;
+    if (pos.qty < 1e-10) pos.qty = 0;
+  }
+  acct.positions[sym] = pos;
+  acct.history.unshift({ t:Date.now(), sym, side, qty: filledQty, px, type });
+  save(); renderAccount(); return true;
+}
+function placeOrder(side){
+  const type = $("otype").value, amt = parseFloat($("amt").value);
+  if (!amt || amt <= 0) return alert("Enter a USD amount.");
+  if (type === "market"){
+    const px = side === "buy" ? (bestAsk[cur] || prices[cur]) : (bestBid[cur] || prices[cur]);
+    if (!px) return alert("No live price yet — wait a second.");
+    if (!fillOrder(side, cur, amt, px, "market")) return alert(side==="buy" ? "Not enough cash." : "Not enough position to sell.");
+  } else {
+    const lp = parseFloat($("limitpx").value);
+    if (!lp || lp <= 0) return alert("Enter a limit price.");
+    if (side === "buy" && amt > acct.cash) return alert("Not enough cash.");
+    acct.orders.push({ id:Date.now()+Math.random(), sym:cur, side, amt, limit:lp });
+    save(); renderAccount();
+  }
+}
+function checkLimits(sym, px){
+  let changed = false;
+  acct.orders = acct.orders.filter(o => {
+    if (o.sym !== sym) return true;
+    if ((o.side === "buy" && px <= o.limit) || (o.side === "sell" && px >= o.limit)){
+      fillOrder(o.side, o.sym, o.amt, o.limit, "limit"); changed = true; return false;
+    }
+    return true;
+  });
+  if (changed){ save(); renderAccount(); }
+}
+
+// ---------- account rendering ----------
+function renderAccount(){
+  let eq = acct.cash, upnl = 0;
+  const rows = Object.entries(acct.positions).filter(([,p]) => p.qty > 0).map(([sym,p]) => {
+    const px = prices[sym] || p.avg, val = p.qty*px, pnl = (px-p.avg)*p.qty;
+    eq += val; upnl += pnl;
+    return `<tr><td class="l">${sym}</td><td>${fmtQ(p.qty)}</td><td>${fmtP(p.avg)}</td><td>${fmtP(px)}</td><td>${fmt$(val)}</td><td class="${pnl>=0?'up':'down'}">${fmt$(pnl)}</td></tr>`;
+  }).join("");
+  $("positions").innerHTML = rows || `<tr><td class="l" colspan="6" style="color:#5b6677">No positions yet — place a paper buy.</td></tr>`;
+  $("openorders").innerHTML = acct.orders.map(o =>
+    `<tr><td class="l">${o.sym}</td><td class="${o.side==='buy'?'up':'down'}">${o.side.toUpperCase()}</td><td>${fmt$(o.amt)}</td><td>${fmtP(o.limit)}</td><td><button class="cancel" data-id="${o.id}">✕</button></td></tr>`).join("") ||
+    `<tr><td class="l" colspan="5" style="color:#5b6677">None</td></tr>`;
+  document.querySelectorAll(".cancel").forEach(b => b.onclick = () => { acct.orders = acct.orders.filter(o => String(o.id) !== b.dataset.id); save(); renderAccount(); });
+  $("history").innerHTML = acct.history.slice(0,40).map(h =>
+    `<tr><td class="l">${new Date(h.t).toLocaleTimeString()}</td><td class="l ${h.side==='buy'?'up':'down'}">${h.side.toUpperCase()} ${h.sym} (${h.type})</td><td>${fmtQ(h.qty)}</td><td>${fmtP(h.px)}</td></tr>`).join("");
+  $("a-cash").textContent = fmt$(acct.cash);
+  $("a-eq").textContent = fmt$(eq);
+  $("a-rpnl").innerHTML = `<span class="${acct.realized>=0?'up':'down'}">${fmt$(acct.realized)}</span>`;
+  $("a-upnl").innerHTML = `<span class="${upnl>=0?'up':'down'}">${fmt$(upnl)}</span>`;
+}
+
+// ---------- websocket ----------
+let ws;
+function connect(){
+  ws = new WebSocket("wss://ws-feed.exchange.coinbase.com");
+  ws.onopen = () => {
+    $("wsdot").classList.add("on"); $("wsstat").textContent = "LIVE · streaming";
+    ws.send(JSON.stringify({ type:"subscribe", product_ids:SYMBOLS, channels:["ticker"] }));
+    ws.send(JSON.stringify({ type:"subscribe", product_ids:[cur], channels:["matches"] }));
+  };
+  ws.onclose = () => { $("wsdot").classList.remove("on"); $("wsstat").textContent = "disconnected · retrying…"; setTimeout(connect, 3000); };
+  ws.onerror = () => { try{ ws.close(); }catch(e){} };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "ticker" && m.price){
+      const px = parseFloat(m.price); prices[m.product_id] = px;
+      if (m.best_bid) bestBid[m.product_id] = parseFloat(m.best_bid);
+      if (m.best_ask) bestAsk[m.product_id] = parseFloat(m.best_ask);
+      if (m.product_id === cur){
+        $("bigprice") && ($("bigprice").textContent = "$" + fmtP(px));
+        if (candles.length){
+          const last = candles[candles.length-1];
+          last.c = px; last.h = Math.max(last.h,px); last.l = Math.min(last.l,px);
+          if (Math.floor(Date.now()/60000) > last.t/60 + 59) { /* next tick rolls via reload */ }
+        }
+        checkLimits(cur, px);
+        renderAccountThrottled();
+      }
+    }
+    else if (m.type === "snapshot" && m.product_id === cur){
+      book.bids = new Map(m.bids.map(([p,s]) => [parseFloat(p), parseFloat(s)]));
+      book.asks = new Map(m.asks.map(([p,s]) => [parseFloat(p), parseFloat(s)]));
+      renderBook();
+    }
+    else if (m.type === "l2update" && m.product_id === cur){
+      m.changes.forEach(([side,p,s]) => {
+        const map = side === "buy" ? book.bids : book.asks, px = parseFloat(p), sz = parseFloat(s);
+        if (sz === 0) map.delete(px); else map.set(px, sz);
+      });
+      renderBookThrottled();
+    }
+    else if ((m.type === "match" || m.type === "last_match") && m.product_id === cur){
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="l">${new Date(m.time).toLocaleTimeString()}</td><td class="${m.side==='buy'?'down':'up'}">${fmtP(parseFloat(m.price))}</td><td>${fmtQ(parseFloat(m.size))}</td><td class="${m.side==='buy'?'down':'up'}">${m.side==='buy'?'SELL':'BUY'}</td>`;
+      const tb = $("tape"); tb.prepend(tr); while (tb.children.length > 9) tb.lastChild.remove();
+    }
+  };
+}
+let bookTimer = null, acctTimer = null, chartTimer = null;
+function renderBookThrottled(){ if (!bookTimer) bookTimer = setTimeout(()=>{ bookTimer=null; renderBook(); }, 400); }
+function renderAccountThrottled(){ if (!acctTimer) acctTimer = setTimeout(()=>{ acctTimer=null; renderAccount(); }, 1000); }
+setInterval(drawChart, 1500);
+setInterval(loadStats, 30000);
+setInterval(loadCandles, 60000);
+
+function switchSymbol(sym){
+  if (sym === cur) return;
+  try { ws.send(JSON.stringify({ type:"unsubscribe", product_ids:[cur], channels:["matches"] })); } catch(e){}
+  cur = sym; book = { bids:new Map(), asks:new Map() };
+  renderSymbar(); loadCandles(); loadStats(); loadBook();
+  try { ws.send(JSON.stringify({ type:"subscribe", product_ids:[cur], channels:["matches"] })); } catch(e){}
+}
+
+// ---------- order book via REST (public level-2 book, polled) ----------
+async function loadBook(){
+  try {
+    const r = await fetch(`${API}/products/${cur}/book?level=2`); const b = await r.json();
+    if (!b.bids || !b.asks) return;
+    book.bids = new Map(b.bids.map(([p,s]) => [parseFloat(p), parseFloat(s)]));
+    book.asks = new Map(b.asks.map(([p,s]) => [parseFloat(p), parseFloat(s)]));
+    renderBook();
+  } catch(e){}
+}
+setInterval(loadBook, 1500);
+
+// ---------- wire up ----------
+$("otype").onchange = () => { const lim = $("otype").value === "limit"; $("limitpx").style.display = lim ? "" : "none"; $("limitlabel").style.display = lim ? "" : "none"; if (lim && prices[cur]) $("limitpx").value = prices[cur]; };
+$("buybtn").onclick = () => placeOrder("buy");
+$("sellbtn").onclick = () => placeOrder("sell");
+$("resetbtn").onclick = () => { if (confirm("Reset paper account to $100,000?")){ acct = { cash:100000, positions:{}, orders:[], history:[], realized:0 }; save(); renderAccount(); } };
+renderSymbar(); loadCandles(); loadStats(); loadBook(); renderAccount(); connect();
+</script>
+</body>
+</html>
